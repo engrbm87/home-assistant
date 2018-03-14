@@ -350,7 +350,7 @@ hikvision==0.4
 hipnotify==1.0.8
 
 # homeassistant.components.binary_sensor.workday
-holidays==0.9.3
+holidays==0.9.4
 
 # homeassistant.components.frontend
 home-assistant-frontend==20180310.0
@@ -1023,6 +1023,9 @@ pyunifi==2.13
 # homeassistant.components.vera
 pyvera==0.2.42
 
+# homeassistant.components.switch.vesync
+pyvesync==0.1.1
+
 # homeassistant.components.media_player.vizio
 pyvizio==0.0.2
 
@@ -1153,7 +1156,7 @@ somecomfort==0.5.0
 speedtest-cli==2.0.0
 
 # homeassistant.components.sensor.spotcrime
-spotcrime==1.0.2
+spotcrime==1.0.3
 
 # homeassistant.components.recorder
 # homeassistant.scripts.db_migrator
