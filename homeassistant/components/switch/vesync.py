@@ -60,8 +60,6 @@ class VeSyncSwitchHA(SwitchDevice):
     def __init__(self, plug):
         """Initialize the VeSync switch device."""
         self.smartplug = plug
-        self._current_power_w = None
-        self._today_energy_kwh = None
 
     @property
     def unique_id(self):
@@ -76,12 +74,12 @@ class VeSyncSwitchHA(SwitchDevice):
     @property
     def current_power_w(self):
         """Return the current power usage in W."""
-        return self._current_power_w
+        return self.smartplug.get_power()
 
     @property
     def today_energy_kwh(self):
         """Return the today total energy usage in kWh."""
-        return self._today_energy_kwh
+        return self.smartplug.get_kwh_today()
 
     @property
     def available(self) -> bool:
@@ -104,5 +102,3 @@ class VeSyncSwitchHA(SwitchDevice):
     def update(self):
         """Handle data changes for node values."""
         self.smartplug.update()
-        self._current_power_w = self.smartplug.get_power()
-        self._today_energy_kwh = self.smartplug.get_kwh_today()
