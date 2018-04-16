@@ -31,23 +31,7 @@ SENSOR_TYPES = {
     'solar_today':
         ['Solar Today', 'mdi:white-balance-sunny', 'remote', 'kWh', 'solar'],
     'power_today':
-<<<<<<< HEAD
-        ['Power Today', 'mdi:power-plug', 'remote', 'kWh', 'consumption'],
-    'water_sensor_1':
-        ['Water Sensor 1', 'mdi:water', 'water', 'm3', 'value1'],
-    'water_sensor_2':
-        ['Water Sensor 2', 'mdi:water', 'water', 'm3', 'value2'],
-    'water_sensor_temperature':
-        ['Water Sensor Temperature', 'mdi:temperature-celsius',
-         'water', '°', 'temperature'],
-    'water_sensor_humidity':
-        ['Water Sensor Humidity', 'mdi:water-percent', 'water',
-         '%', 'humidity'],
-    'water_sensor_battery':
-        ['Water Sensor Battery', 'mdi:battery', 'water', '%', 'battery'],
-=======
         ['Power Today', 'mdi:power-plug', 'remote', 'kWh', 'consumption']
->>>>>>> Fixed SI units for current consumption (#13190)
 }
 
 SCAN_INTERVAL = timedelta(seconds=30)
