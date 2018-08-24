@@ -7,7 +7,8 @@ from homeassistant.components.homekit.type_security_systems import (
 from homeassistant.const import (
     ATTR_CODE, ATTR_SERVICE, ATTR_SERVICE_DATA, EVENT_CALL_SERVICE,
     STATE_ALARM_ARMED_AWAY, STATE_ALARM_ARMED_HOME,
-    STATE_ALARM_ARMED_NIGHT, STATE_ALARM_DISARMED, STATE_UNKNOWN)
+    STATE_ALARM_ARMED_NIGHT, STATE_ALARM_DISARMED, STATE_ALARM_TRIGGERED,
+    STATE_UNKNOWN)
 
 from tests.common import get_test_home_assistant
 
@@ -65,10 +66,15 @@ class TestHomekitSecuritySystems(unittest.TestCase):
         self.assertEqual(acc.char_target_state.value, 3)
         self.assertEqual(acc.char_current_state.value, 3)
 
+        self.hass.states.set(acp, STATE_ALARM_TRIGGERED)
+        self.hass.block_till_done()
+        self.assertEqual(acc.char_target_state.value, 3)
+        self.assertEqual(acc.char_current_state.value, 4)
+
         self.hass.states.set(acp, STATE_UNKNOWN)
         self.hass.block_till_done()
         self.assertEqual(acc.char_target_state.value, 3)
-        self.assertEqual(acc.char_current_state.value, 3)
+        self.assertEqual(acc.char_current_state.value, 4)
 
         # Set from HomeKit
         acc.char_target_state.client_update_value(0)
@@ -109,8 +115,16 @@ class TestHomekitSecuritySystems(unittest.TestCase):
 
         acc = SecuritySystem(self.hass, 'SecuritySystem', acp,
                              2, config={ATTR_CODE: None})
-        acc.run()
+        # Set from HomeKit
+        acc.char_target_state.client_update_value(0)
+        self.hass.block_till_done()
+        self.assertEqual(
+            self.events[0].data[ATTR_SERVICE], 'alarm_arm_home')
+        self.assertNotIn(ATTR_CODE, self.events[0].data[ATTR_SERVICE_DATA])
+        self.assertEqual(acc.char_target_state.value, 0)
 
+        acc = SecuritySystem(self.hass, 'SecuritySystem', acp,
+                             2, config={})
         # Set from HomeKit
         acc.char_target_state.client_update_value(0)
         self.hass.block_till_done()
