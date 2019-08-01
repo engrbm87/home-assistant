@@ -1,364 +1,630 @@
 """Test different accessory types: Thermostats."""
-import unittest
+from collections import namedtuple
+from unittest.mock import patch
 
-from homeassistant.core import callback
-from homeassistant.components.climate import (
-    ATTR_CURRENT_TEMPERATURE, ATTR_TEMPERATURE,
-    ATTR_TARGET_TEMP_LOW, ATTR_TARGET_TEMP_HIGH, ATTR_OPERATION_MODE,
-    ATTR_OPERATION_LIST, STATE_COOL, STATE_HEAT, STATE_AUTO)
+import pytest
+
+from homeassistant.components.climate.const import (
+    ATTR_CURRENT_TEMPERATURE,
+    ATTR_HVAC_ACTIONS,
+    ATTR_HVAC_MODE,
+    ATTR_HVAC_MODES,
+    ATTR_MAX_TEMP,
+    ATTR_MIN_TEMP,
+    ATTR_TARGET_TEMP_HIGH,
+    ATTR_TARGET_TEMP_LOW,
+    ATTR_TARGET_TEMP_STEP,
+    CURRENT_HVAC_COOL,
+    CURRENT_HVAC_HEAT,
+    CURRENT_HVAC_IDLE,
+    DEFAULT_MAX_TEMP,
+    DEFAULT_MIN_TEMP,
+    DOMAIN as DOMAIN_CLIMATE,
+    HVAC_MODE_COOL,
+    HVAC_MODE_HEAT,
+    HVAC_MODE_HEAT_COOL,
+    HVAC_MODE_OFF,
+)
+from homeassistant.components.homekit.const import (
+    ATTR_VALUE,
+    DEFAULT_MAX_TEMP_WATER_HEATER,
+    DEFAULT_MIN_TEMP_WATER_HEATER,
+    PROP_MAX_VALUE,
+    PROP_MIN_STEP,
+    PROP_MIN_VALUE,
+)
+from homeassistant.components.water_heater import DOMAIN as DOMAIN_WATER_HEATER
 from homeassistant.const import (
-    ATTR_ENTITY_ID, ATTR_SERVICE, ATTR_SERVICE_DATA, ATTR_SUPPORTED_FEATURES,
-    ATTR_UNIT_OF_MEASUREMENT, EVENT_CALL_SERVICE,
-    STATE_OFF, TEMP_CELSIUS, TEMP_FAHRENHEIT)
+    ATTR_ENTITY_ID,
+    ATTR_SUPPORTED_FEATURES,
+    ATTR_TEMPERATURE,
+    CONF_TEMPERATURE_UNIT,
+    TEMP_FAHRENHEIT,
+)
 
-from tests.common import get_test_home_assistant
-from tests.components.homekit.test_accessories import patch_debounce
+from tests.common import async_mock_service
+from tests.components.homekit.common import patch_debounce
 
 
-class TestHomekitThermostats(unittest.TestCase):
-    """Test class for all accessory types regarding thermostats."""
+@pytest.fixture(scope="module")
+def cls():
+    """Patch debounce decorator during import of type_thermostats."""
+    patcher = patch_debounce()
+    patcher.start()
+    _import = __import__(
+        "homeassistant.components.homekit.type_thermostats",
+        fromlist=["Thermostat", "WaterHeater"],
+    )
+    patcher_tuple = namedtuple("Cls", ["thermostat", "water_heater"])
+    yield patcher_tuple(thermostat=_import.Thermostat, water_heater=_import.WaterHeater)
+    patcher.stop()
 
-    @classmethod
-    def setUpClass(cls):
-        """Setup Thermostat class import and debounce patcher."""
-        cls.patcher = patch_debounce()
-        cls.patcher.start()
-        _import = __import__(
-            'homeassistant.components.homekit.type_thermostats',
-            fromlist=['Thermostat'])
-        cls.thermostat_cls = _import.Thermostat
 
-    @classmethod
-    def tearDownClass(cls):
-        """Stop debounce patcher."""
-        cls.patcher.stop()
+async def test_thermostat(hass, hk_driver, cls, events):
+    """Test if accessory and HA are updated accordingly."""
+    entity_id = "climate.test"
 
-    def setUp(self):
-        """Setup things to be run when tests are started."""
-        self.hass = get_test_home_assistant()
-        self.events = []
+    hass.states.async_set(entity_id, HVAC_MODE_OFF)
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
 
-        @callback
-        def record_event(event):
-            """Track called event."""
-            self.events.append(event)
+    assert acc.aid == 2
+    assert acc.category == 9  # Thermostat
 
-        self.hass.bus.listen(EVENT_CALL_SERVICE, record_event)
+    assert acc.get_temperature_range() == (7.0, 35.0)
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 0
+    assert acc.char_current_temp.value == 21.0
+    assert acc.char_target_temp.value == 21.0
+    assert acc.char_display_units.value == 0
+    assert acc.char_cooling_thresh_temp is None
+    assert acc.char_heating_thresh_temp is None
 
-    def tearDown(self):
-        """Stop down everything that was started."""
-        self.hass.stop()
+    assert acc.char_target_temp.properties[PROP_MAX_VALUE] == DEFAULT_MAX_TEMP
+    assert acc.char_target_temp.properties[PROP_MIN_VALUE] == DEFAULT_MIN_TEMP
+    assert acc.char_target_temp.properties[PROP_MIN_STEP] == 0.5
 
-    def test_default_thermostat(self):
-        """Test if accessory and HA are updated accordingly."""
-        climate = 'climate.test'
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT,
+        {
+            ATTR_TEMPERATURE: 22.2,
+            ATTR_CURRENT_TEMPERATURE: 17.8,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_HEAT,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 1
+    assert acc.char_target_heat_cool.value == 1
+    assert acc.char_current_temp.value == 18.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_OFF, {ATTR_SUPPORTED_FEATURES: 0})
-        self.hass.block_till_done()
-        acc = self.thermostat_cls(self.hass, 'Climate', climate,
-                                  2, config=None)
-        acc.run()
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT,
+        {
+            ATTR_TEMPERATURE: 22.0,
+            ATTR_CURRENT_TEMPERATURE: 23.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 1
+    assert acc.char_current_temp.value == 23.0
+    assert acc.char_display_units.value == 0
 
-        self.assertEqual(acc.aid, 2)
-        self.assertEqual(acc.category, 9)  # Thermostat
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_COOL,
+        {
+            ATTR_TEMPERATURE: 20.0,
+            ATTR_CURRENT_TEMPERATURE: 25.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_COOL,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 20.0
+    assert acc.char_current_heat_cool.value == 2
+    assert acc.char_target_heat_cool.value == 2
+    assert acc.char_current_temp.value == 25.0
+    assert acc.char_display_units.value == 0
 
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 0)
-        self.assertEqual(acc.char_current_temp.value, 21.0)
-        self.assertEqual(acc.char_target_temp.value, 21.0)
-        self.assertEqual(acc.char_display_units.value, 0)
-        self.assertEqual(acc.char_cooling_thresh_temp, None)
-        self.assertEqual(acc.char_heating_thresh_temp, None)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_COOL,
+        {
+            ATTR_TEMPERATURE: 20.0,
+            ATTR_CURRENT_TEMPERATURE: 19.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 20.0
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 2
+    assert acc.char_current_temp.value == 19.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_HEAT,
-                             {ATTR_OPERATION_MODE: STATE_HEAT,
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 1)
-        self.assertEqual(acc.char_target_heat_cool.value, 1)
-        self.assertEqual(acc.char_current_temp.value, 18.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_OFF,
+        {ATTR_TEMPERATURE: 22.0, ATTR_CURRENT_TEMPERATURE: 18.0},
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 0
+    assert acc.char_current_temp.value == 18.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_HEAT,
-                             {ATTR_OPERATION_MODE: STATE_HEAT,
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 23.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 1)
-        self.assertEqual(acc.char_current_temp.value, 23.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODES: [HVAC_MODE_HEAT, HVAC_MODE_COOL],
+            ATTR_TEMPERATURE: 22.0,
+            ATTR_CURRENT_TEMPERATURE: 18.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_HEAT,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 1
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 18.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_COOL,
-                             {ATTR_OPERATION_MODE: STATE_COOL,
-                              ATTR_TEMPERATURE: 20.0,
-                              ATTR_CURRENT_TEMPERATURE: 25.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 20.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 2)
-        self.assertEqual(acc.char_target_heat_cool.value, 2)
-        self.assertEqual(acc.char_current_temp.value, 25.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODES: [HVAC_MODE_HEAT, HVAC_MODE_COOL],
+            ATTR_TEMPERATURE: 22.0,
+            ATTR_CURRENT_TEMPERATURE: 25.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_COOL,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 2
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 25.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_COOL,
-                             {ATTR_OPERATION_MODE: STATE_COOL,
-                              ATTR_TEMPERATURE: 20.0,
-                              ATTR_CURRENT_TEMPERATURE: 19.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 20.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 2)
-        self.assertEqual(acc.char_current_temp.value, 19.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODES: [HVAC_MODE_HEAT, HVAC_MODE_COOL],
+            ATTR_TEMPERATURE: 22.0,
+            ATTR_CURRENT_TEMPERATURE: 22.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 22.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_OFF,
-                             {ATTR_OPERATION_MODE: STATE_OFF,
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 0)
-        self.assertEqual(acc.char_current_temp.value, 18.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    # Set from HomeKit
+    call_set_temperature = async_mock_service(hass, DOMAIN_CLIMATE, "set_temperature")
+    call_set_hvac_mode = async_mock_service(hass, DOMAIN_CLIMATE, "set_hvac_mode")
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_OPERATION_LIST: [STATE_HEAT, STATE_COOL],
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 1)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 18.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    await hass.async_add_job(acc.char_target_temp.client_update_value, 19.0)
+    await hass.async_block_till_done()
+    assert call_set_temperature
+    assert call_set_temperature[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[0].data[ATTR_TEMPERATURE] == 19.0
+    assert acc.char_target_temp.value == 19.0
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == "19.0°C"
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_OPERATION_LIST: [STATE_HEAT, STATE_COOL],
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 25.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 2)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 25.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 1)
+    await hass.async_block_till_done()
+    assert call_set_hvac_mode
+    assert call_set_hvac_mode[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_hvac_mode[0].data[ATTR_HVAC_MODE] == HVAC_MODE_HEAT
+    assert acc.char_target_heat_cool.value == 1
+    assert len(events) == 2
+    assert events[-1].data[ATTR_VALUE] == HVAC_MODE_HEAT
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_OPERATION_LIST: [STATE_HEAT, STATE_COOL],
-                              ATTR_TEMPERATURE: 22.0,
-                              ATTR_CURRENT_TEMPERATURE: 22.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 22.0)
-        self.assertEqual(acc.char_display_units.value, 0)
 
-        # Set from HomeKit
-        acc.char_target_temp.client_update_value(19.0)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE], 'set_temperature')
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE_DATA][ATTR_TEMPERATURE], 19.0)
-        self.assertEqual(acc.char_target_temp.value, 19.0)
+async def test_thermostat_auto(hass, hk_driver, cls, events):
+    """Test if accessory and HA are updated accordingly."""
+    entity_id = "climate.test"
 
-        acc.char_target_heat_cool.client_update_value(1)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE], 'set_operation_mode')
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE_DATA][ATTR_OPERATION_MODE],
-            STATE_HEAT)
-        self.assertEqual(acc.char_target_heat_cool.value, 1)
+    # support_auto = True
+    hass.states.async_set(entity_id, HVAC_MODE_OFF, {ATTR_SUPPORTED_FEATURES: 6})
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
 
-    def test_auto_thermostat(self):
-        """Test if accessory and HA are updated accordingly."""
-        climate = 'climate.test'
+    assert acc.char_cooling_thresh_temp.value == 23.0
+    assert acc.char_heating_thresh_temp.value == 19.0
 
-        # support_auto = True
-        self.hass.states.set(climate, STATE_OFF, {ATTR_SUPPORTED_FEATURES: 6})
-        self.hass.block_till_done()
-        acc = self.thermostat_cls(self.hass, 'Climate', climate,
-                                  2, config=None)
-        acc.run()
+    assert acc.char_cooling_thresh_temp.properties[PROP_MAX_VALUE] == DEFAULT_MAX_TEMP
+    assert acc.char_cooling_thresh_temp.properties[PROP_MIN_VALUE] == DEFAULT_MIN_TEMP
+    assert acc.char_cooling_thresh_temp.properties[PROP_MIN_STEP] == 0.5
+    assert acc.char_heating_thresh_temp.properties[PROP_MAX_VALUE] == DEFAULT_MAX_TEMP
+    assert acc.char_heating_thresh_temp.properties[PROP_MIN_VALUE] == DEFAULT_MIN_TEMP
+    assert acc.char_heating_thresh_temp.properties[PROP_MIN_STEP] == 0.5
 
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 23.0)
-        self.assertEqual(acc.char_heating_thresh_temp.value, 19.0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT_COOL,
+            ATTR_TARGET_TEMP_HIGH: 22.0,
+            ATTR_TARGET_TEMP_LOW: 20.0,
+            ATTR_CURRENT_TEMPERATURE: 18.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_HEAT,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_heating_thresh_temp.value == 20.0
+    assert acc.char_cooling_thresh_temp.value == 22.0
+    assert acc.char_current_heat_cool.value == 1
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 18.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_TARGET_TEMP_HIGH: 22.0,
-                              ATTR_TARGET_TEMP_LOW: 20.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_heating_thresh_temp.value, 20.0)
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 22.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 1)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 18.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT_COOL,
+            ATTR_TARGET_TEMP_HIGH: 23.0,
+            ATTR_TARGET_TEMP_LOW: 19.0,
+            ATTR_CURRENT_TEMPERATURE: 24.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_COOL,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_heating_thresh_temp.value == 19.0
+    assert acc.char_cooling_thresh_temp.value == 23.0
+    assert acc.char_current_heat_cool.value == 2
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 24.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_TARGET_TEMP_HIGH: 23.0,
-                              ATTR_TARGET_TEMP_LOW: 19.0,
-                              ATTR_CURRENT_TEMPERATURE: 24.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_heating_thresh_temp.value, 19.0)
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 23.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 2)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 24.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT_COOL,
+            ATTR_TARGET_TEMP_HIGH: 23.0,
+            ATTR_TARGET_TEMP_LOW: 19.0,
+            ATTR_CURRENT_TEMPERATURE: 21.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_heating_thresh_temp.value == 19.0
+    assert acc.char_cooling_thresh_temp.value == 23.0
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 3
+    assert acc.char_current_temp.value == 21.0
+    assert acc.char_display_units.value == 0
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_TARGET_TEMP_HIGH: 23.0,
-                              ATTR_TARGET_TEMP_LOW: 19.0,
-                              ATTR_CURRENT_TEMPERATURE: 21.0,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_CELSIUS})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_heating_thresh_temp.value, 19.0)
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 23.0)
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 3)
-        self.assertEqual(acc.char_current_temp.value, 21.0)
-        self.assertEqual(acc.char_display_units.value, 0)
+    # Set from HomeKit
+    call_set_temperature = async_mock_service(hass, DOMAIN_CLIMATE, "set_temperature")
 
-        # Set from HomeKit
-        acc.char_heating_thresh_temp.client_update_value(20.0)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE], 'set_temperature')
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE_DATA][ATTR_TARGET_TEMP_LOW], 20.0)
-        self.assertEqual(acc.char_heating_thresh_temp.value, 20.0)
+    await hass.async_add_job(acc.char_heating_thresh_temp.client_update_value, 20.0)
+    await hass.async_block_till_done()
+    assert call_set_temperature[0]
+    assert call_set_temperature[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[0].data[ATTR_TARGET_TEMP_LOW] == 20.0
+    assert acc.char_heating_thresh_temp.value == 20.0
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == "heating threshold 20.0°C"
 
-        acc.char_cooling_thresh_temp.client_update_value(25.0)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE], 'set_temperature')
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE_DATA][ATTR_TARGET_TEMP_HIGH],
-            25.0)
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 25.0)
+    await hass.async_add_job(acc.char_cooling_thresh_temp.client_update_value, 25.0)
+    await hass.async_block_till_done()
+    assert call_set_temperature[1]
+    assert call_set_temperature[1].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[1].data[ATTR_TARGET_TEMP_HIGH] == 25.0
+    assert acc.char_cooling_thresh_temp.value == 25.0
+    assert len(events) == 2
+    assert events[-1].data[ATTR_VALUE] == "cooling threshold 25.0°C"
 
-    def test_power_state(self):
-        """Test if accessory and HA are updated accordingly."""
-        climate = 'climate.test'
 
-        # SUPPORT_ON_OFF = True
-        self.hass.states.set(climate, STATE_HEAT,
-                             {ATTR_SUPPORTED_FEATURES: 4096,
-                              ATTR_OPERATION_MODE: STATE_HEAT,
-                              ATTR_TEMPERATURE: 23.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0})
-        self.hass.block_till_done()
-        acc = self.thermostat_cls(self.hass, 'Climate', climate,
-                                  2, config=None)
-        acc.run()
-        self.assertTrue(acc.support_power_state)
+async def test_thermostat_power_state(hass, hk_driver, cls, events):
+    """Test if accessory and HA are updated accordingly."""
+    entity_id = "climate.test"
 
-        self.assertEqual(acc.char_current_heat_cool.value, 1)
-        self.assertEqual(acc.char_target_heat_cool.value, 1)
+    # SUPPORT_ON_OFF = True
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT,
+        {
+            ATTR_SUPPORTED_FEATURES: 4096,
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT,
+            ATTR_TEMPERATURE: 23.0,
+            ATTR_CURRENT_TEMPERATURE: 18.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_HEAT,
+        },
+    )
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
 
-        self.hass.states.set(climate, STATE_OFF,
-                             {ATTR_OPERATION_MODE: STATE_HEAT,
-                              ATTR_TEMPERATURE: 23.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 0)
+    assert acc.char_current_heat_cool.value == 1
+    assert acc.char_target_heat_cool.value == 1
 
-        self.hass.states.set(climate, STATE_OFF,
-                             {ATTR_OPERATION_MODE: STATE_OFF,
-                              ATTR_TEMPERATURE: 23.0,
-                              ATTR_CURRENT_TEMPERATURE: 18.0})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_current_heat_cool.value, 0)
-        self.assertEqual(acc.char_target_heat_cool.value, 0)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_OFF,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT,
+            ATTR_TEMPERATURE: 23.0,
+            ATTR_CURRENT_TEMPERATURE: 18.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 0
 
-        # Set from HomeKit
-        acc.char_target_heat_cool.client_update_value(1)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE], 'turn_on')
-        self.assertEqual(
-            self.events[0].data[ATTR_SERVICE_DATA][ATTR_ENTITY_ID],
-            climate)
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE], 'set_operation_mode')
-        self.assertEqual(
-            self.events[1].data[ATTR_SERVICE_DATA][ATTR_OPERATION_MODE],
-            STATE_HEAT)
-        self.assertEqual(acc.char_target_heat_cool.value, 1)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_OFF,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_OFF,
+            ATTR_TEMPERATURE: 23.0,
+            ATTR_CURRENT_TEMPERATURE: 18.0,
+            ATTR_HVAC_ACTIONS: CURRENT_HVAC_IDLE,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.char_current_heat_cool.value == 0
+    assert acc.char_target_heat_cool.value == 0
 
-        acc.char_target_heat_cool.client_update_value(0)
-        self.hass.block_till_done()
-        self.assertEqual(
-            self.events[2].data[ATTR_SERVICE], 'turn_off')
-        self.assertEqual(
-            self.events[2].data[ATTR_SERVICE_DATA][ATTR_ENTITY_ID],
-            climate)
-        self.assertEqual(acc.char_target_heat_cool.value, 0)
+    # Set from HomeKit
+    call_set_hvac_mode = async_mock_service(hass, DOMAIN_CLIMATE, "set_hvac_mode")
 
-    def test_thermostat_fahrenheit(self):
-        """Test if accessory and HA are updated accordingly."""
-        climate = 'climate.test'
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 1)
+    await hass.async_block_till_done()
+    assert call_set_hvac_mode
+    assert call_set_hvac_mode[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_hvac_mode[0].data[ATTR_HVAC_MODE] == HVAC_MODE_HEAT
+    assert acc.char_target_heat_cool.value == 1
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == HVAC_MODE_HEAT
 
-        # support_auto = True
-        self.hass.states.set(climate, STATE_OFF, {ATTR_SUPPORTED_FEATURES: 6})
-        self.hass.block_till_done()
-        acc = self.thermostat_cls(self.hass, 'Climate', climate,
-                                  2, config=None)
-        acc.run()
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 0)
+    await hass.async_block_till_done()
+    assert acc.char_target_heat_cool.value == 0
+    assert len(events) == 2
+    assert events[-1].data[ATTR_VALUE] == HVAC_MODE_OFF
 
-        self.hass.states.set(climate, STATE_AUTO,
-                             {ATTR_OPERATION_MODE: STATE_AUTO,
-                              ATTR_TARGET_TEMP_HIGH: 75.2,
-                              ATTR_TARGET_TEMP_LOW: 68,
-                              ATTR_TEMPERATURE: 71.6,
-                              ATTR_CURRENT_TEMPERATURE: 73.4,
-                              ATTR_UNIT_OF_MEASUREMENT: TEMP_FAHRENHEIT})
-        self.hass.block_till_done()
-        self.assertEqual(acc.char_heating_thresh_temp.value, 20.0)
-        self.assertEqual(acc.char_cooling_thresh_temp.value, 24.0)
-        self.assertEqual(acc.char_current_temp.value, 23.0)
-        self.assertEqual(acc.char_target_temp.value, 22.0)
-        self.assertEqual(acc.char_display_units.value, 1)
 
-        # Set from HomeKit
-        acc.char_cooling_thresh_temp.client_update_value(23)
-        self.hass.block_till_done()
-        service_data = self.events[-1].data[ATTR_SERVICE_DATA]
-        self.assertEqual(service_data[ATTR_TARGET_TEMP_HIGH], 73.4)
-        self.assertEqual(service_data[ATTR_TARGET_TEMP_LOW], 68)
+async def test_thermostat_fahrenheit(hass, hk_driver, cls, events):
+    """Test if accessory and HA are updated accordingly."""
+    entity_id = "climate.test"
 
-        acc.char_heating_thresh_temp.client_update_value(22)
-        self.hass.block_till_done()
-        service_data = self.events[-1].data[ATTR_SERVICE_DATA]
-        self.assertEqual(service_data[ATTR_TARGET_TEMP_HIGH], 73.4)
-        self.assertEqual(service_data[ATTR_TARGET_TEMP_LOW], 71.6)
+    # support_ = True
+    hass.states.async_set(entity_id, HVAC_MODE_OFF, {ATTR_SUPPORTED_FEATURES: 6})
+    await hass.async_block_till_done()
+    with patch.object(hass.config.units, CONF_TEMPERATURE_UNIT, new=TEMP_FAHRENHEIT):
+        acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
 
-        acc.char_target_temp.client_update_value(24.0)
-        self.hass.block_till_done()
-        service_data = self.events[-1].data[ATTR_SERVICE_DATA]
-        self.assertEqual(service_data[ATTR_TEMPERATURE], 75.2)
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT_COOL,
+        {
+            ATTR_HVAC_MODE: HVAC_MODE_HEAT_COOL,
+            ATTR_TARGET_TEMP_HIGH: 75.2,
+            ATTR_TARGET_TEMP_LOW: 68.1,
+            ATTR_TEMPERATURE: 71.6,
+            ATTR_CURRENT_TEMPERATURE: 73.4,
+        },
+    )
+    await hass.async_block_till_done()
+    assert acc.get_temperature_range() == (7.0, 35.0)
+    assert acc.char_heating_thresh_temp.value == 20.0
+    assert acc.char_cooling_thresh_temp.value == 24.0
+    assert acc.char_current_temp.value == 23.0
+    assert acc.char_target_temp.value == 22.0
+    assert acc.char_display_units.value == 1
+
+    # Set from HomeKit
+    call_set_temperature = async_mock_service(hass, DOMAIN_CLIMATE, "set_temperature")
+
+    await hass.async_add_job(acc.char_cooling_thresh_temp.client_update_value, 23)
+    await hass.async_block_till_done()
+    assert call_set_temperature[0]
+    assert call_set_temperature[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[0].data[ATTR_TARGET_TEMP_HIGH] == 73.5
+    assert call_set_temperature[0].data[ATTR_TARGET_TEMP_LOW] == 68
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == "cooling threshold 73.5°F"
+
+    await hass.async_add_job(acc.char_heating_thresh_temp.client_update_value, 22)
+    await hass.async_block_till_done()
+    assert call_set_temperature[1]
+    assert call_set_temperature[1].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[1].data[ATTR_TARGET_TEMP_HIGH] == 73.5
+    assert call_set_temperature[1].data[ATTR_TARGET_TEMP_LOW] == 71.5
+    assert len(events) == 2
+    assert events[-1].data[ATTR_VALUE] == "heating threshold 71.5°F"
+
+    await hass.async_add_job(acc.char_target_temp.client_update_value, 24.0)
+    await hass.async_block_till_done()
+    assert call_set_temperature[2]
+    assert call_set_temperature[2].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[2].data[ATTR_TEMPERATURE] == 75.0
+    assert len(events) == 3
+    assert events[-1].data[ATTR_VALUE] == "75.0°F"
+
+
+async def test_thermostat_get_temperature_range(hass, hk_driver, cls):
+    """Test if temperature range is evaluated correctly."""
+    entity_id = "climate.test"
+
+    hass.states.async_set(entity_id, HVAC_MODE_OFF)
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+
+    hass.states.async_set(
+        entity_id, HVAC_MODE_OFF, {ATTR_MIN_TEMP: 20, ATTR_MAX_TEMP: 25}
+    )
+    await hass.async_block_till_done()
+    assert acc.get_temperature_range() == (20, 25)
+
+    acc._unit = TEMP_FAHRENHEIT
+    hass.states.async_set(
+        entity_id, HVAC_MODE_OFF, {ATTR_MIN_TEMP: 60, ATTR_MAX_TEMP: 70}
+    )
+    await hass.async_block_till_done()
+    assert acc.get_temperature_range() == (15.5, 21.0)
+
+
+async def test_thermostat_temperature_step_whole(hass, hk_driver, cls):
+    """Test climate device with single digit precision."""
+    entity_id = "climate.test"
+
+    hass.states.async_set(entity_id, HVAC_MODE_OFF, {ATTR_TARGET_TEMP_STEP: 1})
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "Climate", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
+
+    assert acc.char_target_temp.properties[PROP_MIN_STEP] == 1.0
+
+
+async def test_water_heater(hass, hk_driver, cls, events):
+    """Test if accessory and HA are updated accordingly."""
+    entity_id = "water_heater.test"
+
+    hass.states.async_set(entity_id, HVAC_MODE_HEAT)
+    await hass.async_block_till_done()
+    acc = cls.water_heater(hass, hk_driver, "WaterHeater", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
+
+    assert acc.aid == 2
+    assert acc.category == 9  # Thermostat
+
+    assert acc.char_current_heat_cool.value == 1  # Heat
+    assert acc.char_target_heat_cool.value == 1  # Heat
+    assert acc.char_current_temp.value == 50.0
+    assert acc.char_target_temp.value == 50.0
+    assert acc.char_display_units.value == 0
+
+    assert (
+        acc.char_target_temp.properties[PROP_MAX_VALUE] == DEFAULT_MAX_TEMP_WATER_HEATER
+    )
+    assert (
+        acc.char_target_temp.properties[PROP_MIN_VALUE] == DEFAULT_MIN_TEMP_WATER_HEATER
+    )
+    assert acc.char_target_temp.properties[PROP_MIN_STEP] == 0.5
+
+    hass.states.async_set(
+        entity_id,
+        HVAC_MODE_HEAT,
+        {ATTR_HVAC_MODE: HVAC_MODE_HEAT, ATTR_TEMPERATURE: 56.0},
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 56.0
+    assert acc.char_current_temp.value == 56.0
+    assert acc.char_target_heat_cool.value == 1
+    assert acc.char_current_heat_cool.value == 1
+    assert acc.char_display_units.value == 0
+
+    hass.states.async_set(
+        entity_id, HVAC_MODE_HEAT_COOL, {ATTR_HVAC_MODE: HVAC_MODE_HEAT_COOL}
+    )
+    await hass.async_block_till_done()
+    assert acc.char_target_heat_cool.value == 1
+    assert acc.char_current_heat_cool.value == 1
+
+    # Set from HomeKit
+    call_set_temperature = async_mock_service(
+        hass, DOMAIN_WATER_HEATER, "set_temperature"
+    )
+
+    await hass.async_add_job(acc.char_target_temp.client_update_value, 52.0)
+    await hass.async_block_till_done()
+    assert call_set_temperature
+    assert call_set_temperature[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[0].data[ATTR_TEMPERATURE] == 52.0
+    assert acc.char_target_temp.value == 52.0
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == "52.0°C"
+
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 0)
+    await hass.async_block_till_done()
+    assert acc.char_target_heat_cool.value == 1
+
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 2)
+    await hass.async_block_till_done()
+    assert acc.char_target_heat_cool.value == 1
+
+    await hass.async_add_job(acc.char_target_heat_cool.client_update_value, 3)
+    await hass.async_block_till_done()
+    assert acc.char_target_heat_cool.value == 1
+
+
+async def test_water_heater_fahrenheit(hass, hk_driver, cls, events):
+    """Test if accessory and HA are update accordingly."""
+    entity_id = "water_heater.test"
+
+    hass.states.async_set(entity_id, HVAC_MODE_HEAT)
+    await hass.async_block_till_done()
+    with patch.object(hass.config.units, CONF_TEMPERATURE_UNIT, new=TEMP_FAHRENHEIT):
+        acc = cls.water_heater(hass, hk_driver, "WaterHeater", entity_id, 2, None)
+    await hass.async_add_job(acc.run)
+    await hass.async_block_till_done()
+
+    hass.states.async_set(entity_id, HVAC_MODE_HEAT, {ATTR_TEMPERATURE: 131})
+    await hass.async_block_till_done()
+    assert acc.char_target_temp.value == 55.0
+    assert acc.char_current_temp.value == 55.0
+    assert acc.char_display_units.value == 1
+
+    # Set from HomeKit
+    call_set_temperature = async_mock_service(
+        hass, DOMAIN_WATER_HEATER, "set_temperature"
+    )
+
+    await hass.async_add_job(acc.char_target_temp.client_update_value, 60)
+    await hass.async_block_till_done()
+    assert call_set_temperature
+    assert call_set_temperature[0].data[ATTR_ENTITY_ID] == entity_id
+    assert call_set_temperature[0].data[ATTR_TEMPERATURE] == 140.0
+    assert acc.char_target_temp.value == 60.0
+    assert len(events) == 1
+    assert events[-1].data[ATTR_VALUE] == "140.0°F"
+
+
+async def test_water_heater_get_temperature_range(hass, hk_driver, cls):
+    """Test if temperature range is evaluated correctly."""
+    entity_id = "water_heater.test"
+
+    hass.states.async_set(entity_id, HVAC_MODE_HEAT)
+    await hass.async_block_till_done()
+    acc = cls.thermostat(hass, hk_driver, "WaterHeater", entity_id, 2, None)
+
+    hass.states.async_set(
+        entity_id, HVAC_MODE_HEAT, {ATTR_MIN_TEMP: 20, ATTR_MAX_TEMP: 25}
+    )
+    await hass.async_block_till_done()
+    assert acc.get_temperature_range() == (20, 25)
+
+    acc._unit = TEMP_FAHRENHEIT
+    hass.states.async_set(
+        entity_id, HVAC_MODE_OFF, {ATTR_MIN_TEMP: 60, ATTR_MAX_TEMP: 70}
+    )
+    await hass.async_block_till_done()
+    assert acc.get_temperature_range() == (15.5, 21.0)
