@@ -37,12 +37,14 @@ from homeassistant.const import (
     SERVICE_ALARM_ARM_AWAY,
     SERVICE_ALARM_ARM_NIGHT,
     SERVICE_ALARM_ARM_CUSTOM_BYPASS,
+    SERVICE_ALARM_TRIGGER,
     STATE_ALARM_DISARMED,
     STATE_ALARM_ARMED_HOME,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_NIGHT,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_PENDING,
+    STATE_ALARM_TRIGGERED,
     ATTR_CODE,
     STATE_UNKNOWN,
 )
@@ -897,17 +899,13 @@ class ArmDisArmTrait(_Trait):
 
     name = TRAIT_ARMDISARM
     commands = [COMMAND_ARMDISARM]
-    armed_states = [
-        STATE_ALARM_ARMED_HOME,
-        STATE_ALARM_ARMED_AWAY,
-        STATE_ALARM_ARMED_NIGHT,
-        STATE_ALARM_ARMED_CUSTOM_BYPASS,
-    ]
-    arm_commands = {
-        STATE_ALARM_ARMED_HOME: alarm_control_panel.SERVICE_ALARM_ARM_HOME,
-        STATE_ALARM_ARMED_AWAY: alarm_control_panel.SERVICE_ALARM_ARM_AWAY,
-        STATE_ALARM_ARMED_NIGHT: alarm_control_panel.SERVICE_ALARM_ARM_NIGHT,
-        STATE_ALARM_ARMED_CUSTOM_BYPASS: alarm_control_panel.SERVICE_ALARM_ARM_CUSTOM_BYPASS,
+
+    state_to_service = {
+        STATE_ALARM_ARMED_HOME: SERVICE_ALARM_ARM_HOME,
+        STATE_ALARM_ARMED_AWAY: SERVICE_ALARM_ARM_AWAY,
+        STATE_ALARM_ARMED_NIGHT: SERVICE_ALARM_ARM_NIGHT,
+        STATE_ALARM_ARMED_CUSTOM_BYPASS: SERVICE_ALARM_ARM_CUSTOM_BYPASS,
+        STATE_ALARM_TRIGGERED: SERVICE_ALARM_TRIGGER,
     }
 
     @staticmethod
@@ -923,35 +921,21 @@ class ArmDisArmTrait(_Trait):
     def sync_attributes(self):
         """Return ArmDisarm attributes for a sync request."""
         response = {}
-        response["availableArmLevels"] = {
-            "levels": [
-                {
-                    "level_name": STATE_ALARM_ARMED_AWAY,
-                    "level_values": [
-                        {"level_synonym": ["armed away", "away"], "lang": "en"}
-                    ],
-                },
-                {
-                    "level_name": STATE_ALARM_ARMED_HOME,
-                    "level_values": [
-                        {"level_synonym": ["armed home", "home"], "lang": "en"}
-                    ],
-                },
-                {
-                    "level_name": STATE_ALARM_ARMED_NIGHT,
-                    "level_values": [
-                        {"level_synonym": ["armed night", "night"], "lang": "en"}
-                    ],
-                },
-                {
-                    "level_name": STATE_ALARM_ARMED_CUSTOM_BYPASS,
-                    "level_values": [
-                        {"level_synonym": ["armed custom", "custom"], "lang": "en"}
-                    ],
-                },
-            ],
-            "ordered": False,
-        }
+        levels = []
+        for key in self.state_to_service:
+            level = {
+                "level_name": key,
+                "level_values": [
+                    {
+                        "level_synonym": [
+                            key.split("_")[1 if key != STATE_ALARM_TRIGGERED else 0]
+                        ],
+                        "lang": "en",
+                    }
+                ],
+            }
+            levels.append(level)
+        response["availableArmLevels"] = {"levels": levels, "ordered": False}
         return response
 
     def query_attributes(self):
@@ -962,23 +946,27 @@ class ArmDisArmTrait(_Trait):
             armed_state = self.state.state
 
         return {
-            "isArmed": armed_state in self.armed_states,
+            "isArmed": armed_state in self.state_to_service,
             "currentArmLevel": armed_state,
         }
 
     async def execute(self, command, data, params, challenge):
         """Execute an ArmDisarm command."""
-        # _LOGGER.info("{}".format(data.config.entity_config()))
-        _verify_pin_challenge(data, self.state, challenge)
-        if params["arm"]:
-            service = self.arm_commands[params["armLevel"]]
+        if params["arm"] and self.state.attributes["code_arm_required"]:
+            _verify_pin_challenge(data, self.state, challenge)
+        elif params["arm"]:
+            service = self.state_to_service[params["armLevel"]]
         else:
-            service = alarm_control_panel.SERVICE_ALARM_DISARM
+            _verify_pin_challenge(data, self.state, challenge)
+            service = SERVICE_ALARM_DISARM
 
         await self.hass.services.async_call(
             alarm_control_panel.DOMAIN,
             service,
-            {ATTR_ENTITY_ID: self.state.entity_id, ATTR_CODE: challenge["pin"]},
+            {
+                ATTR_ENTITY_ID: self.state.entity_id,
+                ATTR_CODE: challenge["pin"] if challenge else "",
+            },
             blocking=True,
             context=data.context,
         )
