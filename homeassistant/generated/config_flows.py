@@ -46,6 +46,7 @@ FLOWS = [
     "luftdaten",
     "mailgun",
     "met",
+    "mikrotik",
     "mobile_app",
     "mqtt",
     "neato",
