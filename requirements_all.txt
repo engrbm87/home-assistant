@@ -260,7 +260,7 @@ aprslib==0.6.46
 aqualogic==1.0
 
 # homeassistant.components.arcam_fmj
-arcam-fmj==0.4.3
+arcam-fmj==0.4.4
 
 # homeassistant.components.arris_tg2492lg
 arris-tg2492lg==1.0.0
@@ -713,7 +713,7 @@ hole==0.5.1
 holidays==0.10.2
 
 # homeassistant.components.frontend
-home-assistant-frontend==20200424.0
+home-assistant-frontend==20200427.0
 
 # homeassistant.components.zwave
 homeassistant-pyozw==0.1.10
@@ -1580,6 +1580,9 @@ pysonos==0.0.25
 # homeassistant.components.spc
 pyspcwebgw==0.4.0
 
+# homeassistant.components.squeezebox
+pysqueezebox==0.1.2
+
 # homeassistant.components.stiebel_eltron
 pystiebeleltron==0.0.1.dev2
 
@@ -1885,7 +1888,7 @@ simplehound==0.3
 simplepush==1.1.4
 
 # homeassistant.components.simplisafe
-simplisafe-python==9.1.0
+simplisafe-python==9.2.0
 
 # homeassistant.components.sisyphus
 sisyphus-control==2.2.1
