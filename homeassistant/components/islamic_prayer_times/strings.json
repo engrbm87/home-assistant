@@ -15,7 +15,10 @@
     "step": {
       "init": {
         "data": {
-          "calc_method": "Prayer calculation method"
+          "calculation_method": "Prayer calculation method",
+          "school": "Asr calculation school",
+          "midnightMode": "Midnight calculation method",
+          "latitudeAdjustmentMethod": "Method for adjusting times for higher latitudes"
         }
       }
     }

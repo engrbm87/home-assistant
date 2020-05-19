@@ -33,13 +33,26 @@ NEW_PRAYER_TIMES = {
 }
 
 NEW_PRAYER_TIMES_TIMESTAMPS = {
-    "Fajr": datetime(2020, 1, 1, 6, 00, 0),
-    "Sunrise": datetime(2020, 1, 1, 7, 25, 0),
-    "Dhuhr": datetime(2020, 1, 1, 12, 30, 0),
-    "Asr": datetime(2020, 1, 1, 15, 32, 0),
-    "Maghrib": datetime(2020, 1, 1, 17, 45, 0),
-    "Isha": datetime(2020, 1, 1, 18, 53, 0),
-    "Midnight": datetime(2020, 1, 1, 00, 43, 0),
+    "Fajr": datetime(2020, 1, 2, 6, 00, 0),
+    "Sunrise": datetime(2020, 1, 2, 7, 25, 0),
+    "Dhuhr": datetime(2020, 1, 2, 12, 30, 0),
+    "Asr": datetime(2020, 1, 2, 15, 32, 0),
+    "Maghrib": datetime(2020, 1, 2, 17, 45, 0),
+    "Isha": datetime(2020, 1, 2, 18, 53, 0),
+    "Midnight": datetime(2020, 1, 2, 00, 43, 0),
 }
 
 NOW = datetime(2020, 1, 1, 00, 00, 0)
+
+MOCK_RESPONSE = [
+    {"data": {"timings": PRAYER_TIMES}},
+    {"data": {"timings": NEW_PRAYER_TIMES}},
+    {"data": {"timings": PRAYER_TIMES}},
+    {"data": {"timings": NEW_PRAYER_TIMES}},
+    {"data": {"timings": PRAYER_TIMES}},
+    {"data": {"timings": NEW_PRAYER_TIMES}},
+    {"data": {"timings": PRAYER_TIMES}},
+    {"data": {"timings": NEW_PRAYER_TIMES}},
+]
+
+# WEEKLY_PRAYER_TIMES =

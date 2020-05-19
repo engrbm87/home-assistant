@@ -5,7 +5,7 @@ from homeassistant.const import DEVICE_CLASS_TIMESTAMP
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
-from .const import DATA_UPDATED, DOMAIN, PRAYER_TIMES_ICON, SENSOR_SUFFIX, SENSOR_TYPES
+from .const import DATA_UPDATED, DOMAIN, PRAYER_TIMES_ICON, SENSOR_TYPES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class IslamicPrayerTimeSensor(Entity):
     @property
     def name(self):
         """Return the name of the sensor."""
-        return f"{self.sensor_type} {SENSOR_SUFFIX}"
+        return f"{self.sensor_type} {SENSOR_TYPES[self.sensor_type]}"
 
     @property
     def unique_id(self):
@@ -48,7 +48,17 @@ class IslamicPrayerTimeSensor(Entity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        return self.client.prayer_times_info.get(self.sensor_type).isoformat()
+        return self.client.today_prayer_times.get(self.sensor_type).isoformat()
+
+    @property
+    def state_attributes(self):
+        """Return future prayer times."""
+        attrs = {}
+        attrs["weekly_prayers"] = []
+        for prayer_times in self.client.weekly_prayer_times:
+            attrs["weekly_prayers"].append(prayer_times[self.sensor_type].isoformat())
+
+        return attrs
 
     @property
     def should_poll(self):

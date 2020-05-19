@@ -5,7 +5,22 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 
 # pylint: disable=unused-import
-from .const import CALC_METHODS, CONF_CALC_METHOD, DEFAULT_CALC_METHOD, DOMAIN, NAME
+from .const import (
+    CALC_METHODS,
+    CONF_CALC_METHOD,
+    CONF_LAT_ADJ_METHOD,
+    CONF_MIDNIGHT_MODE,
+    CONF_SCHOOL,
+    DEFAULT_CALC_METHOD,
+    DEFAULT_LAT_ADJ_METHOD,
+    DEFAULT_MIDNIGHT_MODE,
+    DEFAULT_SCHOOL,
+    DOMAIN,
+    LAT_ADJ_METHODS,
+    MIDNIGHT_MODES,
+    NAME,
+    SCHOOLS,
+)
 
 
 class IslamicPrayerFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -53,7 +68,23 @@ class IslamicPrayerOptionsFlowHandler(config_entries.OptionsFlow):
                 default=self.config_entry.options.get(
                     CONF_CALC_METHOD, DEFAULT_CALC_METHOD
                 ),
-            ): vol.In(CALC_METHODS)
+            ): vol.In(CALC_METHODS),
+            vol.Optional(
+                CONF_SCHOOL,
+                default=self.config_entry.options.get(CONF_SCHOOL, DEFAULT_SCHOOL),
+            ): vol.In(SCHOOLS),
+            vol.Optional(
+                CONF_MIDNIGHT_MODE,
+                default=self.config_entry.options.get(
+                    CONF_MIDNIGHT_MODE, DEFAULT_MIDNIGHT_MODE
+                ),
+            ): vol.In(MIDNIGHT_MODES),
+            vol.Optional(
+                CONF_LAT_ADJ_METHOD,
+                default=self.config_entry.options.get(
+                    CONF_LAT_ADJ_METHOD, DEFAULT_LAT_ADJ_METHOD
+                ),
+            ): vol.In(LAT_ADJ_METHODS),
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options))

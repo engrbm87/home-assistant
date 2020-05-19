@@ -1,23 +1,26 @@
 {
-    "config": {
-        "abort": {
-            "one_instance_allowed": "Only a single instance is necessary."
-        },
-        "step": {
-            "user": {
-                "description": "Do you want to set up Islamic Prayer Times?",
-                "title": "Set up Islamic Prayer Times"
-            }
-        }
+  "title": "Islamic Prayer Times",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Islamic Prayer Times",
+        "description": "Do you want to set up Islamic Prayer Times?"
+      }
     },
-    "options": {
-        "step": {
-            "init": {
-                "data": {
-                    "calc_method": "Prayer calculation method"
-                }
-            }
+    "abort": {
+      "one_instance_allowed": "Only a single instance is necessary."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "calculation_method": "Prayer calculation method",
+          "school": "Asr calculation school",
+          "midnightMode": "Midnight calculation method",
+          "latitudeAdjustmentMethod": "Method for adjusting times for higher latitudes"
         }
-    },
-    "title": "Islamic Prayer Times"
+      }
+    }
+  }
 }
